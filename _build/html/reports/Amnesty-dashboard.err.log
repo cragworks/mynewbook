@@ -18,63 +18,287 @@ Traceback (most recent call last):
     raise CellExecutionError.from_cell_and_msg(cell, exec_reply_content)
 nbclient.exceptions.CellExecutionError: An error occurred while executing the following cell:
 ------------------
-import warnings
-import pandas as pd
-import numpy as np
-import geopandas as gpd
-from bokeh.io import output_notebook, show
-from bokeh.models import (
-    GeoJSONDataSource,
-    Slider,
-    CustomJS,
-    LinearColorMapper,
-    Range1d,
-    ColumnDataSource,
-    LabelSet,
-    Span
-)
-from bokeh.models import HoverTool
-from bokeh.plotting import figure
-from bokeh.layouts import column, row
-import json
-from bokeh.models import LinearAxis
-from bokeh.palettes import PuBu, Greens, Reds
-from IPython.display import display
-from IPython.display import HTML
+# Load world geometry data
+world = gpd.read_file("data/ne_110m_admin_0_countries.shp")
 
-%pip install ipywidgets
-%pip install colorcet
-import colorcet
-import ipywidgets as widgets
-output_notebook(hide_banner=True)
-warnings.filterwarnings('ignore') 
-css = HTML('''
-<style>
-    :root {
-      --jp-notebook-max-width: 100%;
-    }
-</style>
-''')
-display(css)
-hide_default = HTML('''
-<script>
-jQuery(function() { 
-        jQuery("div.jp-Cell-inputWrapper").toggle();
-    }
-);
-</script>
-''')
-toggle_button = HTML('''<button onclick="jQuery('div.jp-Cell-inputWrapper').toggle();">Toggle code</button>''')
+AFR = ["Algeria","Angola","Benin","Botswana,Burkina Faso","Burundi","Cameroon","Congo","Côte d’Ivoire","Democratic Republic of the Congo","Djibouti","Egypt","Eritrea","Ethiopia","Gabon","The Gambia","Ghana","Kenya","Libya","Madagascar","Malawi","Mali","Mauritania","Mauritius","Morocco","Namibia","Nigeria","Rwanda","Senegal","Sierra Leone","South Africa","Somalia","Sudan","Togo","Tunisia","Uganda","Zambia",]
+APAC = ["Afghanistan","Azerbaijan","Bahrain","Bangladesh","China","Fiji","India","Indonesia","Iraq","Japan","Jordan","Kazakhstan","Kuwait","Kyrgyzstan","Malaysia","Maldives","Marshall Islands","Mongolia","Nepal","Pakistan","Philippines","Qatar","Republic of Korea","Saudi Arabia","Sri Lanka","Thailand","United Arab Emirates","Uzbekistan","Viet Nam",]
+GRULAC = ["Argentina","Bahamas","Bolivia (Plurinational State of)","Brazil","Chile","Costa Rica","Cuba","Ecuador","El Salvador","Guatemala","Honduras","Mexico","Nicaragua","Panama","Paraguay","Peru","Uruguay","Venezuela (Bolivarian Republic of)",]
+WEOG = ["Australia","Austria","Belgium","Canada","Denmark","Finland","France","Germany","Iceland","Ireland","Italy","Luxembourg","Netherlands","Norway","Portugal","Spain","Switzerland","United Kingdom of Great Britain and Northern Ireland","United States of America",]
+EG = ["Albania","Armenia","Bosnia and Herzegovina","Bulgaria","Czechia","Croatia","Estonia","Georgia","Hungary","Latvia","Lithuania","Montenegro","Poland","Republic of Moldova","Republic of North Macedonia","Romania","Russian Federation","Slovakia","Slovenia","Ukraine",]
+
+# Function to assign color based on country group
+def assign_color(country):
+    if country in AFR:
+        return "blue"
+    elif country in APAC:
+        return "green"
+    elif country in GRULAC:
+        return "red"
+    elif country in WEOG:
+        return "yellow"
+    elif country in EG:
+        return "orange"
+    else:
+        return "lightgray"
+
+
+def get_country_group(country):
+    if country in AFR:
+        return "AFR"
+    elif country in APAC:
+        return "APAC"
+    elif country in GRULAC:
+        return "GRULAC"
+    elif country in WEOG:
+        return "WEOG"
+    elif country in EG:
+        return "EG"
+
+
+def calculate_alignment(row):
+    if row["Country"] == "China":
+        return 1
+    if row["China Vote"] == "Abstaining":
+        return 0
+    if row["Vote"] == row["China Vote"]:
+        return 1
+    else:
+        return -1
+
+
+def add_alignment_percentage(df):
+    try:
+        df["alignment_percentage"] = (
+            df["alignment_score"] / df["Number of votes"]
+        ) * 100
+    except Exception:
+        pass
+    return df
+
+
+def add_alignment(df):
+    try:
+        df["alignment"] = df["alignment_score"] / df["Number of votes"]
+    except Exception:
+        pass
+    return df
+
+def add_alignment_change(df):
+    try:
+        df["alignment_change"] = df["alignment"] - df["alignment"].shift(1)
+    except Exception:
+        pass
+    return df
+
+def add_fa_change(df):
+    try:
+        df["FT_ODI_change"] = df["FT_ODI"] - df["FT_ODI"].shift(1)
+        df["AEI_FDI_change"] = df["AEI_FDI"] - df["AEI_FDI"].shift(1)
+        df["BU_ODA_change"] = df["BU_ODA"] - df["BU_ODA"].shift(1)
+        df["ODI_MOFCOM_change"] = df["ODI_MOFCOM"] - df["ODI_MOFCOM"].shift(1)
+    except Exception:
+        pass
+    return df
+
+def add_average_fa(df):
+    try:
+        df["Average_FA"] = (
+            df[["FT_ODI", "AEI_FDI", "BU_ODA", "ODI_MOFCOM"]]
+            .replace(0, np.nan)
+            .mean(axis=1, skipna=True)
+        )
+        df["Average_FA"] = df["Average_FA"].fillna(0)
+    except Exception:
+        pass
+    return df
+
+def add_average_fa_change(df):
+    try:
+        df["Average_FA_change"] = df["Average_FA"] - df["Average_FA"].shift(1)
+    except Exception:
+        pass
+    return df
+
+def add_measures(df):
+    df = add_alignment_percentage(df)
+    df = add_alignment(df)
+    df = add_average_fa(df)
+    return df
+
+def filter_country_group(row, country_group):
+    return get_country_group(row["Country"]) == country_group
+
+
+# Load and clean data:
+
+# Load your data
+oda = pd.read_csv("data/oda.csv")
+votes = pd.read_csv("data/vote.csv")
+df = pd.concat([oda, votes], ignore_index=True)
+df_vac = pd.read_csv("data/vac.csv")
+
+
+# Clean vaccine data
+df_vac.fillna(0, inplace=True)
+df_vac.rename(
+    columns={
+        "Destination": "Country",
+        "Entry Date (date of delivery)": "Year",
+        "Arrived (D)": "Quantity",
+    },
+    inplace=True,
+)
+df_vac = df_vac.drop(columns=["Region"])
+df_vac["Quantity"] = df_vac["Quantity"].replace("-", np.nan)
+df_vac.dropna(axis=0, subset=["Year", "Quantity"], inplace=True)
+df_vac = df_vac[df_vac["Quantity"] != 0]
+df_vac["Year"] = df_vac["Year"].replace("Aug", "01-Aug-21")
+df_vac["Year"] = df_vac["Year"].replace("Oct-21", "01-Oct-21")
+df_vac["Year"] = df_vac["Year"].replace("17 May 21", "17-May-21")
+df_vac.head()
+df_vac["Year"] = pd.to_datetime(df_vac["Year"], format="%d-%b-%y", dayfirst=True).dt.year
+df_vac = df_vac.astype({"Year": "int", "Quantity": "float32"})
+df_vac = df_vac.groupby(["Year", "Country"]).sum().reset_index()
+
+# Clean vote data
+df["Country Group"] = df["Country"].apply(get_country_group)
+china_votes = df[df["Country"] == "China"][
+    ["Session number", "Text title", "Vote"]
+].rename(columns={"Vote": "China Vote"})
+df = df.merge(
+    china_votes,
+    on=["Session number", "Text title"],
+    suffixes=("", "_china"),
+    how="left",
+)
+# Create a new column 'mapped_vote' that maps three values to -1, 0, and 1
+vote_mapping = {"Against": -1, "Abstaining": 0, "In Favour": 1}
+df["mapped_vote"] = df["Vote"].map(vote_mapping)
+df["mapped_china_vote"] = df["China Vote"].map(vote_mapping)
+
+df["alignment_score"] = df.apply(calculate_alignment, axis=1)
+df_votes = (
+    df.groupby(["Year", "Country", "Country Group", "Topic"])
+    .agg(
+        {
+            "alignment_score": "sum",
+            "Text title": "count",
+        }
+    )
+    .reset_index()
+)
+df_votes.rename({"Text title": "Number of votes"}, axis=1, inplace=True)
+
+# Clean FA data
+df_fa = (
+    df.groupby(["Year", "Country"])
+    .agg(
+        {
+            "ODI_MOFCOM": "first",
+            "BU_ODA": "first",
+            "AEI_FDI": "first",
+            "FT_ODI": "first",
+        }
+    )
+    .reset_index()
+)
+df_fa[["FT_ODI", "AEI_FDI", "BU_ODA", "ODI_MOFCOM"]] = df_fa[
+    ["FT_ODI", "AEI_FDI", "BU_ODA", "ODI_MOFCOM"]
+].fillna(0)
+
+
+# Global widgets
+def get_filter(name):
+    match name:
+        case "fa_type":
+            return widgets.Dropdown(
+                options=["FT_ODI", "AEI_FDI", "BU_ODA", "ODI_MOFCOM", "Average_FA"],value="FT_ODI",
+                description="FA Type:",
+            )
+        case "country_group":
+            return widgets.Dropdown(
+                options=["All", "AFR", "APAC", "GRULAC", "WEOG", "EG"], description="Country Group:", value="All"
+            )
+        case "country":
+            return widgets.Dropdown(options=df.sort_values("Country")["Country"].unique(), description="Country:", value=df["Country"].unique().tolist()[0])
+        case "topic":
+            return widgets.Dropdown(
+                options=["All"]+ df["Topic"].unique().tolist() ,
+                description="Topic:",value="All"
+            )
 ------------------
 
 
 [1;31m---------------------------------------------------------------------------[0m
-[1;31mModuleNotFoundError[0m                       Traceback (most recent call last)
-Cell [1;32mIn[1], line 2[0m
-[0;32m      1[0m [38;5;28;01mimport[39;00m [38;5;21;01mwarnings[39;00m
-[1;32m----> 2[0m [38;5;28;01mimport[39;00m [38;5;21;01mpandas[39;00m [38;5;28;01mas[39;00m [38;5;21;01mpd[39;00m
-[0;32m      3[0m [38;5;28;01mimport[39;00m [38;5;21;01mnumpy[39;00m [38;5;28;01mas[39;00m [38;5;21;01mnp[39;00m
-[0;32m      4[0m [38;5;28;01mimport[39;00m [38;5;21;01mgeopandas[39;00m [38;5;28;01mas[39;00m [38;5;21;01mgpd[39;00m
+[1;31mCPLE_OpenFailedError[0m                      Traceback (most recent call last)
+File [1;32mfiona\\ogrext.pyx:136[0m, in [0;36mfiona.ogrext.gdal_open_vector[1;34m()[0m
 
-[1;31mModuleNotFoundError[0m: No module named 'pandas'
+File [1;32mfiona\\_err.pyx:291[0m, in [0;36mfiona._err.exc_wrap_pointer[1;34m()[0m
+
+[1;31mCPLE_OpenFailedError[0m: data/ne_110m_admin_0_countries.shp: No such file or directory
+
+During handling of the above exception, another exception occurred:
+
+[1;31mDriverError[0m                               Traceback (most recent call last)
+Cell [1;32mIn[2], line 2[0m
+[0;32m      1[0m [38;5;66;03m# Load world geometry data[39;00m
+[1;32m----> 2[0m world [38;5;241m=[39m [43mgpd[49m[38;5;241;43m.[39;49m[43mread_file[49m[43m([49m[38;5;124;43m"[39;49m[38;5;124;43mdata/ne_110m_admin_0_countries.shp[39;49m[38;5;124;43m"[39;49m[43m)[49m
+[0;32m      4[0m AFR [38;5;241m=[39m [[38;5;124m"[39m[38;5;124mAlgeria[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mAngola[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mBenin[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mBotswana,Burkina Faso[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mBurundi[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mCameroon[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mCongo[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mCôte d’Ivoire[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mDemocratic Republic of the Congo[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mDjibouti[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mEgypt[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mEritrea[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mEthiopia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mGabon[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mThe Gambia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mGhana[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mKenya[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mLibya[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMadagascar[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMalawi[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMali[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMauritania[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMauritius[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMorocco[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mNamibia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mNigeria[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mRwanda[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSenegal[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSierra Leone[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSouth Africa[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSomalia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSudan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mTogo[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mTunisia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mUganda[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mZambia[39m[38;5;124m"[39m,]
+[0;32m      5[0m APAC [38;5;241m=[39m [[38;5;124m"[39m[38;5;124mAfghanistan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mAzerbaijan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mBahrain[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mBangladesh[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mChina[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mFiji[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mIndia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mIndonesia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mIraq[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mJapan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mJordan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mKazakhstan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mKuwait[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mKyrgyzstan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMalaysia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMaldives[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMarshall Islands[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mMongolia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mNepal[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mPakistan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mPhilippines[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mQatar[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mRepublic of Korea[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSaudi Arabia[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mSri Lanka[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mThailand[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mUnited Arab Emirates[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mUzbekistan[39m[38;5;124m"[39m,[38;5;124m"[39m[38;5;124mViet Nam[39m[38;5;124m"[39m,]
+
+File [1;32m~\AppData\Local\Programs\Python\Python311\Lib\site-packages\geopandas\io\file.py:297[0m, in [0;36m_read_file[1;34m(filename, bbox, mask, rows, engine, **kwargs)[0m
+[0;32m    294[0m     [38;5;28;01melse[39;00m:
+[0;32m    295[0m         path_or_bytes [38;5;241m=[39m filename
+[1;32m--> 297[0m     [38;5;28;01mreturn[39;00m [43m_read_file_fiona[49m[43m([49m
+[0;32m    298[0m [43m        [49m[43mpath_or_bytes[49m[43m,[49m[43m [49m[43mfrom_bytes[49m[43m,[49m[43m [49m[43mbbox[49m[38;5;241;43m=[39;49m[43mbbox[49m[43m,[49m[43m [49m[43mmask[49m[38;5;241;43m=[39;49m[43mmask[49m[43m,[49m[43m [49m[43mrows[49m[38;5;241;43m=[39;49m[43mrows[49m[43m,[49m[43m [49m[38;5;241;43m*[39;49m[38;5;241;43m*[39;49m[43mkwargs[49m
+[0;32m    299[0m [43m    [49m[43m)[49m
+[0;32m    301[0m [38;5;28;01melse[39;00m:
+[0;32m    302[0m     [38;5;28;01mraise[39;00m [38;5;167;01mValueError[39;00m([38;5;124mf[39m[38;5;124m"[39m[38;5;124munknown engine [39m[38;5;124m'[39m[38;5;132;01m{[39;00mengine[38;5;132;01m}[39;00m[38;5;124m'[39m[38;5;124m"[39m)
+
+File [1;32m~\AppData\Local\Programs\Python\Python311\Lib\site-packages\geopandas\io\file.py:338[0m, in [0;36m_read_file_fiona[1;34m(path_or_bytes, from_bytes, bbox, mask, rows, where, **kwargs)[0m
+[0;32m    335[0m     reader [38;5;241m=[39m fiona[38;5;241m.[39mopen
+[0;32m    337[0m [38;5;28;01mwith[39;00m fiona_env():
+[1;32m--> 338[0m     [38;5;28;01mwith[39;00m [43mreader[49m[43m([49m[43mpath_or_bytes[49m[43m,[49m[43m [49m[38;5;241;43m*[39;49m[38;5;241;43m*[39;49m[43mkwargs[49m[43m)[49m [38;5;28;01mas[39;00m features:
+[0;32m    339[0m         crs [38;5;241m=[39m features[38;5;241m.[39mcrs_wkt
+[0;32m    340[0m         [38;5;66;03m# attempt to get EPSG code[39;00m
+
+File [1;32m~\AppData\Local\Programs\Python\Python311\Lib\site-packages\fiona\env.py:457[0m, in [0;36mensure_env_with_credentials.<locals>.wrapper[1;34m(*args, **kwds)[0m
+[0;32m    454[0m     session [38;5;241m=[39m DummySession()
+[0;32m    456[0m [38;5;28;01mwith[39;00m env_ctor(session[38;5;241m=[39msession):
+[1;32m--> 457[0m     [38;5;28;01mreturn[39;00m [43mf[49m[43m([49m[38;5;241;43m*[39;49m[43margs[49m[43m,[49m[43m [49m[38;5;241;43m*[39;49m[38;5;241;43m*[39;49m[43mkwds[49m[43m)[49m
+
+File [1;32m~\AppData\Local\Programs\Python\Python311\Lib\site-packages\fiona\__init__.py:305[0m, in [0;36mopen[1;34m(fp, mode, driver, schema, crs, encoding, layer, vfs, enabled_drivers, crs_wkt, allow_unsupported_drivers, **kwargs)[0m
+[0;32m    302[0m     path [38;5;241m=[39m parse_path(fp)
+[0;32m    304[0m [38;5;28;01mif[39;00m mode [38;5;129;01min[39;00m ([38;5;124m"[39m[38;5;124ma[39m[38;5;124m"[39m, [38;5;124m"[39m[38;5;124mr[39m[38;5;124m"[39m):
+[1;32m--> 305[0m     colxn [38;5;241m=[39m [43mCollection[49m[43m([49m
+[0;32m    306[0m [43m        [49m[43mpath[49m[43m,[49m
+[0;32m    307[0m [43m        [49m[43mmode[49m[43m,[49m
+[0;32m    308[0m [43m        [49m[43mdriver[49m[38;5;241;43m=[39;49m[43mdriver[49m[43m,[49m
+[0;32m    309[0m [43m        [49m[43mencoding[49m[38;5;241;43m=[39;49m[43mencoding[49m[43m,[49m
+[0;32m    310[0m [43m        [49m[43mlayer[49m[38;5;241;43m=[39;49m[43mlayer[49m[43m,[49m
+[0;32m    311[0m [43m        [49m[43menabled_drivers[49m[38;5;241;43m=[39;49m[43menabled_drivers[49m[43m,[49m
+[0;32m    312[0m [43m        [49m[43mallow_unsupported_drivers[49m[38;5;241;43m=[39;49m[43mallow_unsupported_drivers[49m[43m,[49m
+[0;32m    313[0m [43m        [49m[38;5;241;43m*[39;49m[38;5;241;43m*[39;49m[43mkwargs[49m
+[0;32m    314[0m [43m    [49m[43m)[49m
+[0;32m    315[0m [38;5;28;01melif[39;00m mode [38;5;241m==[39m [38;5;124m"[39m[38;5;124mw[39m[38;5;124m"[39m:
+[0;32m    316[0m     colxn [38;5;241m=[39m Collection(
+[0;32m    317[0m         path,
+[0;32m    318[0m         mode,
+[1;32m   (...)[0m
+[0;32m    327[0m         [38;5;241m*[39m[38;5;241m*[39mkwargs
+[0;32m    328[0m     )
+
+File [1;32m~\AppData\Local\Programs\Python\Python311\Lib\site-packages\fiona\collection.py:243[0m, in [0;36mCollection.__init__[1;34m(self, path, mode, driver, schema, crs, encoding, layer, vsi, archive, enabled_drivers, crs_wkt, ignore_fields, ignore_geometry, include_fields, wkt_version, allow_unsupported_drivers, **kwargs)[0m
+[0;32m    241[0m [38;5;28;01mif[39;00m [38;5;28mself[39m[38;5;241m.[39mmode [38;5;241m==[39m [38;5;124m"[39m[38;5;124mr[39m[38;5;124m"[39m:
+[0;32m    242[0m     [38;5;28mself[39m[38;5;241m.[39msession [38;5;241m=[39m Session()
+[1;32m--> 243[0m     [38;5;28;43mself[39;49m[38;5;241;43m.[39;49m[43msession[49m[38;5;241;43m.[39;49m[43mstart[49m[43m([49m[38;5;28;43mself[39;49m[43m,[49m[43m [49m[38;5;241;43m*[39;49m[38;5;241;43m*[39;49m[43mkwargs[49m[43m)[49m
+[0;32m    244[0m [38;5;28;01melif[39;00m [38;5;28mself[39m[38;5;241m.[39mmode [38;5;129;01min[39;00m ([38;5;124m"[39m[38;5;124ma[39m[38;5;124m"[39m, [38;5;124m"[39m[38;5;124mw[39m[38;5;124m"[39m):
+[0;32m    245[0m     [38;5;28mself[39m[38;5;241m.[39msession [38;5;241m=[39m WritingSession()
+
+File [1;32mfiona\\ogrext.pyx:588[0m, in [0;36mfiona.ogrext.Session.start[1;34m()[0m
+
+File [1;32mfiona\\ogrext.pyx:143[0m, in [0;36mfiona.ogrext.gdal_open_vector[1;34m()[0m
+
+[1;31mDriverError[0m: data/ne_110m_admin_0_countries.shp: No such file or directory
 
