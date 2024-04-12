@@ -18,19 +18,63 @@ Traceback (most recent call last):
     raise CellExecutionError.from_cell_and_msg(cell, exec_reply_content)
 nbclient.exceptions.CellExecutionError: An error occurred while executing the following cell:
 ------------------
-from matplotlib import rcParams, cycler
-import matplotlib.pyplot as plt
+import warnings
+import pandas as pd
 import numpy as np
-plt.ion()
+import geopandas as gpd
+from bokeh.io import output_notebook, show
+from bokeh.models import (
+    GeoJSONDataSource,
+    Slider,
+    CustomJS,
+    LinearColorMapper,
+    Range1d,
+    ColumnDataSource,
+    LabelSet,
+    Span
+)
+from bokeh.models import HoverTool
+from bokeh.plotting import figure
+from bokeh.layouts import column, row
+import json
+from bokeh.models import LinearAxis
+from bokeh.palettes import PuBu, Greens, Reds
+from IPython.display import display
+from IPython.display import HTML
+
+%pip install ipywidgets
+%pip install colorcet
+import colorcet
+import ipywidgets as widgets
+output_notebook(hide_banner=True)
+warnings.filterwarnings('ignore') 
+css = HTML('''
+<style>
+    :root {
+      --jp-notebook-max-width: 100%;
+    }
+</style>
+''')
+display(css)
+hide_default = HTML('''
+<script>
+jQuery(function() { 
+        jQuery("div.jp-Cell-inputWrapper").toggle();
+    }
+);
+</script>
+''')
+toggle_button = HTML('''<button onclick="jQuery('div.jp-Cell-inputWrapper').toggle();">Toggle code</button>''')
 ------------------
 
 
 [1;31m---------------------------------------------------------------------------[0m
 [1;31mModuleNotFoundError[0m                       Traceback (most recent call last)
-Cell [1;32mIn[1], line 1[0m
-[1;32m----> 1[0m [38;5;28;01mfrom[39;00m [38;5;21;01mmatplotlib[39;00m [38;5;28;01mimport[39;00m rcParams, cycler
-[0;32m      2[0m [38;5;28;01mimport[39;00m [38;5;21;01mmatplotlib[39;00m[38;5;21;01m.[39;00m[38;5;21;01mpyplot[39;00m [38;5;28;01mas[39;00m [38;5;21;01mplt[39;00m
+Cell [1;32mIn[1], line 2[0m
+[0;32m      1[0m [38;5;28;01mimport[39;00m [38;5;21;01mwarnings[39;00m
+[1;32m----> 2[0m [38;5;28;01mimport[39;00m [38;5;21;01mpandas[39;00m [38;5;28;01mas[39;00m [38;5;21;01mpd[39;00m
 [0;32m      3[0m [38;5;28;01mimport[39;00m [38;5;21;01mnumpy[39;00m [38;5;28;01mas[39;00m [38;5;21;01mnp[39;00m
+[0;32m      4[0m [38;5;28;01mimport[39;00m [38;5;21;01mgeopandas[39;00m [38;5;28;01mas[39;00m [38;5;21;01mgpd[39;00m
 
-[1;31mModuleNotFoundError[0m: No module named 'matplotlib'
+[1;31mModuleNotFoundError[0m: No module named 'pandas'
 
